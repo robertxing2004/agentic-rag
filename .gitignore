@@ -36,7 +36,7 @@ next-env.d.ts
 
 # python
 __pycache__/
-venv
+.venv
 
 # chroma
 /chroma_store
