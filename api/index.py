@@ -189,7 +189,7 @@ async def ask_question(request: Request):
   agent = initialize_agent(
     tools,
     llm,
-    agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     verbose=True,
     handle_parsing_errors=True,
     agent_kwargs={"system_message": system_prompt},
