@@ -34,22 +34,61 @@ os.makedirs(CHROMA_DIR, exist_ok=True)
 
 
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(file_path: str) -> list:
   doc = fitz.open(file_path)
-  text = ""
-  for page in doc:
-    text += page.get_text()
-  return text
+  pages = []
+  for page_num, page in enumerate(doc, 1):
+    text = page.get_text()
+    if text.strip():  # Only add non-empty pages
+      pages.append({"page": page_num, "text": text})
+  return pages
 
-def chunk_and_embed_text(text: str):
+def chunk_and_embed_text(pages: list):
   splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-  chunks = splitter.split_text(text)
+  all_chunks = []
+  all_metadata = []
+  
+  for page_data in pages:
+    page_num = page_data["page"]
+    text = page_data["text"]
+    chunks = splitter.split_text(text)
+    
+    for chunk in chunks:
+      all_chunks.append(chunk)
+      all_metadata.append({"page": page_num})
+  
   embeddings = OpenAIEmbeddings()
-  vectordb = Chroma.from_texts(chunks, embedding=embeddings, persist_directory=CHROMA_DIR)
+  vectordb = Chroma.from_texts(
+    all_chunks, 
+    embedding=embeddings, 
+    persist_directory=CHROMA_DIR,
+    metadatas=all_metadata
+  )
   vectordb.persist()
   return vectordb
 
-
+def search_documents_with_citations(query: str):
+  vectordb = Chroma(persist_directory=CHROMA_DIR, embedding_function=OpenAIEmbeddings())
+  retriever = vectordb.as_retriever(search_kwargs={"k": 5})
+  docs = retriever.get_relevant_documents(query)
+  
+  # Group by page and format with citations
+  page_content = {}
+  for doc in docs:
+    page_num = doc.metadata.get("page", "Unknown")
+    if page_num not in page_content:
+      page_content[page_num] = []
+    page_content[page_num].append(doc.page_content)
+  
+  # Format response with page citations
+  response_parts = []
+  # Convert page numbers to int for sorting, handle "Unknown" case
+  sorted_pages = sorted(page_content.keys(), key=lambda x: int(x) if str(x).isdigit() else float('inf'))
+  for page_num in sorted_pages:
+    content = " ".join(page_content[page_num])
+    response_parts.append(f"[Page {page_num}]: {content}")
+  
+  return "\n\n".join(response_parts)
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -57,21 +96,18 @@ async def upload_pdf(file: UploadFile = File(...)):
   with open(temp_file_path, "wb") as buffer:
     shutil.copyfileobj(file.file, buffer)
 
-  text = extract_text_from_pdf(temp_file_path)
-  vectordb = chunk_and_embed_text(text)
+  pages = extract_text_from_pdf(temp_file_path)
+  vectordb = chunk_and_embed_text(pages)
 
   return {"message": "PDF uploaded and embedded successfully."}
 
 @app.post("/ask")
 async def ask_question(question: str = Form(...)):
-  vectordb = Chroma(persist_directory=CHROMA_DIR, embedding_function=OpenAIEmbeddings())
-  retriever = vectordb.as_retriever()
-
   tools = [
     Tool(
       name="DocumentSearch",
-      func=lambda q: retriever.get_relevant_documents(q),
-      description="Use this to look up answers from the uploaded document."
+      func=search_documents_with_citations,
+      description="Use this to look up answers from the uploaded document. Returns content with page citations."
     ),
     Tool(
       name="Calculator",
