@@ -35,7 +35,6 @@ CHROMA_DIR = "./chroma_store"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
-# This will store memory objects by session_id
 session_memories = defaultdict(lambda: ConversationBufferMemory(memory_key="chat_history", return_messages=True))
 
 class ReasoningLogHandler(BaseCallbackHandler):
@@ -49,6 +48,9 @@ class ReasoningLogHandler(BaseCallbackHandler):
     if text.strip():
       self.logs.append(f"Agent: {text.strip()}")
 
+
+
+# pdf upload and embed
 def extract_text_from_pdf(file_path: str) -> list:
   doc = fitz.open(file_path)
   pages = []
@@ -82,6 +84,9 @@ def chunk_and_embed_text(pages: list):
   vectordb.persist()
   return vectordb
 
+
+
+# agent tool implementations
 def search_documents_with_citations(query: str):
   vectordb = Chroma(persist_directory=CHROMA_DIR, embedding_function=OpenAIEmbeddings())
   retriever = vectordb.as_retriever(search_kwargs={"k": 5})
@@ -119,6 +124,9 @@ def clarification(clarification_request: str):
     # Return a dict so the frontend can distinguish this as a clarification
     return {"clarification": f"Could you please clarify: {clarification_request}"}
 
+
+
+# pdf upload endpoint
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
   temp_file_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}_{file.filename}")
@@ -130,6 +138,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
   return {"message": "PDF uploaded and embedded successfully."}
 
+# question endpoint
 @app.post("/ask")
 async def ask_question(request: Request):
   form = await request.form()
@@ -158,28 +167,20 @@ async def ask_question(request: Request):
 
   llm = ChatOpenAI(model="gpt-4", temperature=0)
 
-  # Custom system prompt with specific instructions
   system_prompt = """
     You are a helpful AI assistant that answers questions based on uploaded documents. You should remember the previous conversation and use it to inform your answers.
 
     IMPORTANT INSTRUCTIONS:
-    1. Always use the DocumentSearch tool to find relevant information from the uploaded documents.
-    2. Retrieve a few passages first. If you are not confident you have enough information, use the tool again to retrieve more passages or try a different query.
-    3. When providing answers, ALWAYS cite the specific page numbers where you found the information.
-    4. Format your response clearly with proper citations like: "According to page X..."
-    5. If you find information on multiple pages, cite all relevant pages.
-    6. If you cannot find relevant information in the documents, say so clearly.
-    7. If you cannot find a specific answer, try to find an approximation.
-    8. Use the Clarification tool to askt he user for extra context.
-    9. Be concise but thorough in your answers.
-    10. Use the MathTool tool only for mathematical calculations when needed.
+    1. You MUST use the DocumentSearch tool to find relevant information from the uploaded documents.
+    2. When providing answers, ALWAYS cite the specific page numbers where you found the information.
+    3. Format your response clearly with proper citations like: "According to page X..."
+    4. If you find information on multiple pages, cite all relevant pages.
+    5. If you cannot find relevant information in the documents, say so clearly.
+    6. Use the Clarification tool to ask the user for extra context.
+    7. Use the MathTool tool only for mathematical calculations when needed.
 
     Example response format:
     "Based on the document, [your answer]. This information can be found on pages [X, Y, Z]."
-
-    Remember: Always cite your sources with page numbers!
-
-    
   """
 
   agent = initialize_agent(
@@ -193,7 +194,7 @@ async def ask_question(request: Request):
   )
 
   reasoning_handler = ReasoningLogHandler()
-  response = agent.run(question, callbacks=[reasoning_handler])
+  response = agent.run(agent_input, callbacks=[reasoning_handler])
 
   clarification_msg = None
   answer = response
