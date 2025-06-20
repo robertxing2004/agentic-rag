@@ -59,3 +59,10 @@ When the /ask endpoint is called, the backend returns a `reasoning_log` object a
 
 ## Some takeaways
 
+I dove in pretty blind on how to approach this, so I did end up missing a pretty big part of the agent development process (i.e. taking advantage of more of LangChain's tools such as LangGraph and LangSmith)
+
+Towards the end after I had switched to the CONVERSATIONAL_REACT_DESCRIPTION agent type, I began running into the problem of a rather rebllious agent. Because it had external memory context aside from the source document, it no longer relied on the provided tools to determine a response. Consequently, I got wildly incorrect answers and no page citations.
+
+As such, I was trying to experiment with different ways of preserving memory across subsequent user questions, while also trying to enforce the RAG behaviour.
+
+I suspect that a more thorough exploration of LangGraph might have allowed me to build a more obedient agent. 
