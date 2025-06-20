@@ -2,13 +2,20 @@
 
 import { useState } from 'react';
 
-export default function UploadPDF({ onUpload }: { onUpload: (file: File) => void }) {
+export default function UploadPDF({ onUpload }: { onUpload: (file: File, setStatus: (status: string, message?: string) => void) => void }) {
   const [fileName, setFileName] = useState('');
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
+  const [backendMsg, setBackendMsg] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       setFileName(e.target.files[0].name);
-      onUpload(e.target.files[0]);
+      setStatus('uploading');
+      setBackendMsg('');
+      onUpload(e.target.files[0], (newStatus, msg) => {
+        setStatus(newStatus as any);
+        if (msg) setBackendMsg(msg);
+      });
     }
   };
 
@@ -23,7 +30,9 @@ export default function UploadPDF({ onUpload }: { onUpload: (file: File) => void
                    file:rounded-md file:border-0 file:text-sm file:font-semibold
                    file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
       />
-      {fileName && <p className="mt-2 text-sm text-gray-600">Uploaded: {fileName}</p>}
+      {status === 'uploading' && <p className="mt-2 text-sm text-gray-600">Uploading...</p>}
+      {status === 'uploaded' && <p className="mt-2 text-sm text-green-600">{backendMsg || `Uploaded: ${fileName}`}</p>}
+      {status === 'error' && <p className="mt-2 text-sm text-red-600">{backendMsg || 'Upload failed.'}</p>}
     </div>
   );
 }

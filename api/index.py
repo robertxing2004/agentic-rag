@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import fitz
@@ -6,6 +6,9 @@ import os
 import uuid
 import shutil
 from dotenv import load_dotenv
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain.memory import ConversationBufferMemory
+from collections import defaultdict
 
 load_dotenv()
 
@@ -32,7 +35,19 @@ CHROMA_DIR = "./chroma_store"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
+# This will store memory objects by session_id
+session_memories = defaultdict(lambda: ConversationBufferMemory(memory_key="chat_history", return_messages=True))
 
+class ReasoningLogHandler(BaseCallbackHandler):
+  def __init__(self):
+    self.logs = []
+
+  def on_tool_start(self, serialized, input_str, **kwargs):
+    self.logs.append(f"Tool called: {serialized['name']} with input: {input_str}")
+
+  def on_text(self, text, **kwargs):
+    if text.strip():
+      self.logs.append(f"Agent: {text.strip()}")
 
 def extract_text_from_pdf(file_path: str) -> list:
   doc = fitz.open(file_path)
@@ -90,6 +105,20 @@ def search_documents_with_citations(query: str):
   
   return "\n\n".join(response_parts)
 
+def math_tool(query: str):
+  llm = ChatOpenAI(model="gpt-4", temperature=0)
+  prompt = (
+    "You are a math and date calculation assistant. "
+    "Interpret and solve the following problem, showing your reasoning. "
+    "If the question involves dates or durations, calculate accordingly. "
+    "Question: " + query
+  )
+  return llm.invoke(prompt)
+
+def clarification(clarification_request: str):
+    # Return a dict so the frontend can distinguish this as a clarification
+    return {"clarification": f"Could you please clarify: {clarification_request}"}
+
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
   temp_file_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}_{file.filename}")
@@ -102,29 +131,78 @@ async def upload_pdf(file: UploadFile = File(...)):
   return {"message": "PDF uploaded and embedded successfully."}
 
 @app.post("/ask")
-async def ask_question(question: str = Form(...)):
+async def ask_question(request: Request):
+  form = await request.form()
+  question = form.get("question")
+  session_id = form.get("session_id", "default")  # Use a real session/user id in production
+
+  memory = session_memories[session_id]
+
   tools = [
     Tool(
       name="DocumentSearch",
       func=search_documents_with_citations,
-      description="Use this to look up answers from the uploaded document. Returns content with page citations."
+      description="Use this to look up answers from the uploaded document. Return content with page citations."
     ),
     Tool(
-      name="Calculator",
-      func=lambda expr: str(eval(expr)),
-      description="Use this to evaluate simple math expressions."
+      name="MathTool",
+      func=math_tool,
+      description="Use this to solve calculation problems described in natural language."
+    ),
+    Tool(
+      name="Clarification",
+      func=clarification,
+      description="Use this to ask the user for more information or clarification if the question is ambiguous or missing details. Pass a message describing what you need clarified."
     )
   ]
 
   llm = ChatOpenAI(model="gpt-4", temperature=0)
 
+  # Custom system prompt with specific instructions
+  system_prompt = """
+    You are a helpful AI assistant that answers questions based on uploaded documents. You should remember the previous conversation and use it to inform your answers.
+
+    IMPORTANT INSTRUCTIONS:
+    1. Always use the DocumentSearch tool to find relevant information from the uploaded documents.
+    2. Retrieve a few passages first. If you are not confident you have enough information, use the tool again to retrieve more passages or try a different query.
+    3. When providing answers, ALWAYS cite the specific page numbers where you found the information.
+    4. Format your response clearly with proper citations like: "According to page X..."
+    5. If you find information on multiple pages, cite all relevant pages.
+    6. If you cannot find relevant information in the documents, say so clearly.
+    7. If you cannot find a specific answer, try to find an approximation.
+    8. Use the Clarification tool to askt he user for extra context.
+    9. Be concise but thorough in your answers.
+    10. Use the MathTool tool only for mathematical calculations when needed.
+
+    Example response format:
+    "Based on the document, [your answer]. This information can be found on pages [X, Y, Z]."
+
+    Remember: Always cite your sources with page numbers!
+
+    
+  """
+
   agent = initialize_agent(
     tools,
     llm,
-    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
     verbose=True,
-    handle_parsing_errors=True
+    handle_parsing_errors=True,
+    agent_kwargs={"system_message": system_prompt},
+    memory=memory
   )
 
-  response = agent.run(question)
-  return {"answer": response}
+  reasoning_handler = ReasoningLogHandler()
+  response = agent.run(question, callbacks=[reasoning_handler])
+
+  clarification_msg = None
+  answer = response
+  if isinstance(response, dict) and "clarification" in response:
+    clarification_msg = response["clarification"]
+    answer = ""  # No normal answer in this case
+
+  return {
+    "answer": answer,
+    "clarification": clarification_msg,
+    "reasoning_log": reasoning_handler.logs
+  }
