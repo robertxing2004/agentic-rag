@@ -28,7 +28,8 @@ export default function UploadPDF({ onUpload }: { onUpload: (file: File, setStat
         onChange={handleFileChange}
         className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4
                    file:rounded-md file:border-0 file:text-sm file:font-semibold
-                   file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                   file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100
+                   hover:file:cursor-pointer file:duration-300"
       />
       {status === 'uploading' && <p className="mt-2 text-sm text-gray-600">Uploading...</p>}
       {status === 'uploaded' && <p className="mt-2 text-sm text-green-600">{backendMsg || `Uploaded: ${fileName}`}</p>}
