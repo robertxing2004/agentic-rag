@@ -179,8 +179,11 @@ async def ask_question(request: Request):
     6. Use the Clarification tool to ask the user for extra context.
     7. Use the MathTool tool only for mathematical calculations when needed.
 
+    Example tool output:
+    [Page 2]: [your answer].
+
     Example response format:
-    "Based on the document, [your answer]. This information can be found on pages [X, Y, Z]."
+    "Based on the document, [your answer]. This information can be found on page 2."
   """
 
   agent = initialize_agent(
@@ -194,7 +197,7 @@ async def ask_question(request: Request):
   )
 
   reasoning_handler = ReasoningLogHandler()
-  response = agent.run(agent_input, callbacks=[reasoning_handler])
+  response = agent.run(question, callbacks=[reasoning_handler])
 
   clarification_msg = None
   answer = response
