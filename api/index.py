@@ -5,6 +5,9 @@ import fitz
 import os
 import uuid
 import shutil
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
